@@ -1,0 +1,86 @@
+name: Build Flutter Apps
+
+on:
+  workflow_dispatch:
+    inputs:
+      build-flavors:
+        description: 'Flutter build flavors (comma separated, e.g. release,profile)'
+        required: false
+        default: 'release'
+
+jobs:
+  android:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Install dependencies
+        working-directory: wash_app
+        run: flutter pub get
+
+      - name: Build APK
+        working-directory: wash_app
+        env:
+          BUILD_FLAVORS: ${{ github.event.inputs['build-flavors'] || 'release' }}
+        run: |
+          IFS=',' read -ra FLAVORS <<< "$BUILD_FLAVORS"
+          for flavor in "${FLAVORS[@]}"; do
+            flavor=$(echo "$flavor" | xargs)
+            if [ -n "$flavor" ]; then
+              flutter build apk --${flavor}
+            else
+              flutter build apk --release
+            fi
+          done
+
+      - name: Upload APK artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-apk
+          path: wash_app/build/app/outputs/flutter-apk/*.apk
+
+  ios:
+    name: Build iOS IPA (unsigned)
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Install dependencies
+        working-directory: wash_app
+        run: flutter pub get
+
+      - name: Build IPA
+        working-directory: wash_app
+        env:
+          BUILD_FLAVORS: ${{ github.event.inputs['build-flavors'] || 'release' }}
+        run: |
+          IFS=',' read -ra FLAVORS <<< "$BUILD_FLAVORS"
+          for flavor in "${FLAVORS[@]}"; do
+            flavor=$(echo "$flavor" | xargs)
+            if [ -n "$flavor" ]; then
+              flutter build ipa --${flavor} --no-codesign
+            else
+              flutter build ipa --release --no-codesign
+            fi
+          done
+
+      - name: Upload IPA artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-ipa
+          path: wash_app/build/ios/ipa/*.ipa
