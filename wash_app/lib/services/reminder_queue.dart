@@ -2,9 +2,10 @@ import 'dart:async';
 
 import '../models/washer_device.dart';
 
-typedef DeviceAvailableCallback = void Function(
+typedef DeviceReminderCallback = void Function(
   WasherDevice device,
-  int remainingMinutes,
+  int stageMinutes,
+  bool isFinal,
 );
 
 typedef QueueUpdateCallback = void Function(List<WasherDevice> queue);
@@ -12,16 +13,18 @@ typedef QueueUpdateCallback = void Function(List<WasherDevice> queue);
 typedef NextReminderCallback = void Function(
   WasherDevice? device,
   Duration? delay,
+  int? stageMinutes,
+  bool isFinalStage,
 );
 
 class ReminderQueueController {
   ReminderQueueController({
-    required this.onDeviceAvailable,
+    required this.onReminder,
     required this.onQueueUpdate,
     required this.onNextSchedule,
   });
 
-  final DeviceAvailableCallback onDeviceAvailable;
+  final DeviceReminderCallback onReminder;
   final QueueUpdateCallback onQueueUpdate;
   final NextReminderCallback onNextSchedule;
 
@@ -32,6 +35,8 @@ class ReminderQueueController {
   bool _isActive = false;
   DateTime? _nextTriggerAt;
   int _reminderLeadMinutes = 0;
+  final Map<int, Set<int>> _firedStages = {};
+  final Map<int, int> _stageBaseMinutes = {};
 
   bool get isActive => _isActive;
 
@@ -49,9 +54,7 @@ class ReminderQueueController {
 
   void updateReminderLeadMinutes(int minutes) {
     _reminderLeadMinutes = minutes.clamp(0, 120);
-    if (_queue.isNotEmpty) {
-      _scheduleNextTick();
-    }
+    _reschedule();
   }
 
   void updateQueue(List<WasherDevice> devices) {
@@ -65,10 +68,20 @@ class ReminderQueueController {
       ..clear()
       ..addAll(devices.where(_isEligibleDevice).toList()
         ..sort((a, b) => a.surplusTime.compareTo(b.surplusTime)));
+    _firedStages.removeWhere(
+      (key, value) => !_queue.any((device) => device.id == key),
+    );
+    _stageBaseMinutes
+      ..removeWhere(
+        (key, value) => !_queue.any((device) => device.id == key),
+      );
+    for (final device in _queue) {
+      _stageBaseMinutes[device.id] = device.surplusTime;
+    }
     if (_queue.isEmpty) {
       _nextTriggerAt = null;
       onQueueUpdate(queue);
-      onNextSchedule(null, null);
+      onNextSchedule(null, null, null, false);
       return;
     }
     onQueueUpdate(queue);
@@ -77,6 +90,8 @@ class ReminderQueueController {
 
   void start(List<WasherDevice> devices) {
     _isActive = true;
+    _firedStages.clear();
+    _stageBaseMinutes.clear();
     updateQueue(devices);
   }
 
@@ -86,8 +101,10 @@ class ReminderQueueController {
     _timer?.cancel();
     _timer = null;
     _nextTriggerAt = null;
+    _firedStages.clear();
+    _stageBaseMinutes.clear();
     onQueueUpdate(queue);
-    onNextSchedule(null, null);
+    onNextSchedule(null, null, null, false);
   }
 
   bool toggleExclude(String code) {
@@ -124,35 +141,76 @@ class ReminderQueueController {
     return true;
   }
 
+  void _reschedule() {
+    if (!_isActive) {
+      return;
+    }
+    _timer?.cancel();
+    _scheduleNextTick();
+  }
+
   void _scheduleNextTick() {
     _timer?.cancel();
     if (_queue.isEmpty) {
       _nextTriggerAt = null;
-      onNextSchedule(null, null);
+      onNextSchedule(null, null, null, false);
       return;
     }
     final top = _queue.first;
-    final originalMinutes = top.surplusTime;
-    var minutes = originalMinutes - _reminderLeadMinutes;
-    if (minutes < 0) {
-      minutes = 0;
+    final baseMinutes = _stageBaseMinutes[top.id] ?? top.surplusTime;
+    _stageBaseMinutes[top.id] = baseMinutes;
+    final stages = _resolveStages(baseMinutes);
+    final fired = _firedStages.putIfAbsent(top.id, () => <int>{});
+    int? nextStage;
+    for (final stage in stages) {
+      if (!fired.contains(stage)) {
+        nextStage = stage;
+        break;
+      }
     }
-    Duration delay;
-    if (minutes == 0) {
-      delay = Duration.zero;
-    } else {
-      delay = Duration(minutes: minutes);
-    }
-    _nextTriggerAt = DateTime.now().add(delay);
-    onNextSchedule(top, delay);
-    _timer = Timer(delay, () {
-      final remaining = originalMinutes > _reminderLeadMinutes
-          ? _reminderLeadMinutes
-          : originalMinutes;
-      onDeviceAvailable(top, remaining.clamp(0, 120));
+    if (nextStage == null) {
       _queue.remove(top);
+      _firedStages.remove(top.id);
+      _stageBaseMinutes.remove(top.id);
       onQueueUpdate(queue);
       _scheduleNextTick();
+      return;
+    }
+
+    Duration delay;
+    if (nextStage == 0) {
+      delay = Duration(minutes: baseMinutes);
+    } else {
+      delay = Duration(minutes: baseMinutes - nextStage);
+    }
+    _nextTriggerAt = DateTime.now().add(delay);
+    onNextSchedule(top, delay, nextStage, nextStage == 0);
+    _timer = Timer(delay, () {
+      fired.add(nextStage!);
+      final isFinal = nextStage == 0;
+      if (isFinal) {
+        _stageBaseMinutes[top.id] = 0;
+      } else {
+        _stageBaseMinutes[top.id] = nextStage!;
+      }
+      onReminder(top, nextStage!, isFinal);
+      _scheduleNextTick();
     });
+  }
+
+  List<int> _resolveStages(int originalMinutes) {
+    final stages = <int>[];
+    final desiredStages = <int>{5, 3, 1};
+    if (_reminderLeadMinutes > 0) {
+      desiredStages.add(_reminderLeadMinutes);
+    }
+    desiredStages.add(0);
+    for (final stage in desiredStages) {
+      if (stage == 0 || originalMinutes >= stage) {
+        stages.add(stage);
+      }
+    }
+    stages.sort((a, b) => b.compareTo(a));
+    return stages;
   }
 }

@@ -22,6 +22,131 @@ class HomeTabs extends StatefulWidget {
   State<HomeTabs> createState() => _HomeTabsState();
 }
 
+class _OwnedStatusBadge extends StatelessWidget {
+  const _OwnedStatusBadge({this.remaining});
+
+  final Duration? remaining;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDue = remaining == null || remaining == Duration.zero;
+    final text = remaining == null
+        ? '已标记我的设备'
+        : (isDue
+            ? '已到取衣时间'
+            : '预计 ${_formatOwnedDuration(remaining!)} 后完成');
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: (isDue ? theme.colorScheme.error : theme.colorScheme.primary)
+            .withOpacity(0.12),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            isDue ? Icons.notifications_active : Icons.access_time,
+            size: 14,
+            color: isDue
+                ? theme.colorScheme.error
+                : theme.colorScheme.primary,
+          ),
+          const SizedBox(width: 6),
+          Text(
+            text,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: isDue
+                  ? theme.colorScheme.error
+                  : theme.colorScheme.primary,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+String _formatOwnedDuration(Duration duration) {
+  if (duration.inMinutes >= 60) {
+    final hours = duration.inHours;
+    final minutes = duration.inMinutes.remainder(60);
+    return '$hours 小时 ${minutes.toString().padLeft(2, '0')} 分钟';
+  }
+  if (duration.inMinutes >= 1) {
+    final minutes = duration.inMinutes;
+    final seconds = duration.inSeconds.remainder(60);
+    return '$minutes 分钟 ${seconds.toString().padLeft(2, '0')} 秒';
+  }
+  return '${duration.inSeconds} 秒';
+}
+
+class _OwnedCountdownCard extends StatelessWidget {
+  const _OwnedCountdownCard({
+    required this.name,
+    required this.remaining,
+    required this.onClearOwned,
+  });
+
+  final String name;
+  final Duration remaining;
+  final VoidCallback onClearOwned;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDue = remaining == Duration.zero;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(18),
+        color: (isDue ? theme.colorScheme.error : theme.colorScheme.primary)
+            .withOpacity(0.1),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                isDue ? Icons.notifications_active : Icons.timer,
+                color:
+                    isDue ? theme.colorScheme.error : theme.colorScheme.primary,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  isDue ? '$name 已完成' : '$name 倒计时',
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    color: isDue
+                        ? theme.colorScheme.error
+                        : theme.colorScheme.primary,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              TextButton(
+                onPressed: onClearOwned,
+                child: const Text('取消标记'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            isDue
+                ? '请及时前往取走衣物。'
+                : '预计 ${_formatOwnedDuration(remaining)} 后完成洗涤。',
+            style: theme.textTheme.bodyMedium,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _StatsOverview extends StatelessWidget {
   const _StatsOverview({
     required this.total,
@@ -74,6 +199,7 @@ class _StatsOverview extends StatelessWidget {
       ),
     );
   }
+
 }
 
 class _StatTile extends StatelessWidget {
@@ -207,12 +333,18 @@ class _CompactDeviceTile extends StatelessWidget {
     required this.isExcluded,
     required this.onToggleExclude,
     required this.onDelete,
+    required this.ownedRecord,
+    required this.onMarkOwned,
+    required this.onClearOwned,
   });
 
   final WasherDevice device;
   final bool isExcluded;
   final Future<void> Function(String code) onToggleExclude;
   final VoidCallback onDelete;
+  final OwnedDeviceRecord? ownedRecord;
+  final VoidCallback onMarkOwned;
+  final VoidCallback onClearOwned;
 
   @override
   Widget build(BuildContext context) {
@@ -223,6 +355,13 @@ class _CompactDeviceTile extends StatelessWidget {
       color: statusColor,
       fontWeight: FontWeight.w600,
     );
+    final bool isOwned = ownedRecord != null;
+    final Duration? ownedRemaining = ownedRecord == null
+        ? null
+        : ownedRecord!.finishAt.difference(DateTime.now());
+    final Duration? safeOwnedRemaining = ownedRemaining == null
+        ? null
+        : (ownedRemaining.isNegative ? Duration.zero : ownedRemaining);
 
     return Card(
       elevation: 1,
@@ -267,6 +406,12 @@ class _CompactDeviceTile extends StatelessWidget {
                             fontWeight: FontWeight.w600,
                           ),
                         ),
+                        if (isOwned) ...[
+                          const SizedBox(height: 4),
+                          _OwnedStatusBadge(
+                            remaining: safeOwnedRemaining,
+                          ),
+                        ],
                         const SizedBox(height: 4),
                         Text(
                           device.location.isNotEmpty
@@ -292,6 +437,24 @@ class _CompactDeviceTile extends StatelessWidget {
                           return SafeArea(
                             child: Wrap(
                               children: [
+                                if (!isOwned)
+                                  ListTile(
+                                    leading: const Icon(Icons.flag_outlined),
+                                    title: const Text('标记为我的设备'),
+                                    onTap: () {
+                                      Navigator.of(sheetContext).pop();
+                                      onMarkOwned();
+                                    },
+                                  )
+                                else
+                                  ListTile(
+                                    leading: const Icon(Icons.check_circle),
+                                    title: const Text('取消我的标记'),
+                                    onTap: () {
+                                      Navigator.of(sheetContext).pop();
+                                      onClearOwned();
+                                    },
+                                  ),
                                 ListTile(
                                   leading: Icon(
                                     isExcluded
@@ -365,6 +528,20 @@ class _CompactDeviceTile extends StatelessWidget {
                   ),
                 ],
               ),
+              if (isOwned && safeOwnedRemaining != null) ...[
+                const SizedBox(height: 10),
+                Text(
+                  safeOwnedRemaining == Duration.zero
+                      ? '已到取衣时间'
+                      : '预计 ${_formatOwnedDuration(safeOwnedRemaining)} 后完成',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: safeOwnedRemaining == Duration.zero
+                        ? theme.colorScheme.error
+                        : theme.colorScheme.primary,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
             ],
           ),
         ),
@@ -409,12 +586,13 @@ class _WasherDashboardPageState extends State<WasherDashboardPage> {
   Duration? _nextDelay;
   WasherDevice? _nextDevice;
   bool _useCompactCards = false;
+  Map<String, OwnedDeviceRecord> _ownedDevices = {};
 
   @override
   void initState() {
     super.initState();
     _queueController = ReminderQueueController(
-      onDeviceAvailable: _handleDeviceAvailable,
+      onReminder: _handleReminderStage,
       onQueueUpdate: _handleQueueUpdate,
       onNextSchedule: _handleNextSchedule,
     );
@@ -439,6 +617,7 @@ class _WasherDashboardPageState extends State<WasherDashboardPage> {
     _queueController.updateReminderLeadMinutes(config.reminderLeadMinutes);
     final useCompact = await _prefsService.loadCompactLayout();
     final codes = await _deviceManager.loadDeviceCodes();
+    final owned = await _prefsService.loadOwnedDevices();
     if (!mounted) {
       return;
     }
@@ -447,6 +626,7 @@ class _WasherDashboardPageState extends State<WasherDashboardPage> {
       _deviceCodes = codes;
       _useCompactCards = useCompact;
       _devicesFuture = _repository.fetchDevices(_deviceCodes);
+      _ownedDevices = owned;
     });
   }
 
@@ -457,6 +637,77 @@ class _WasherDashboardPageState extends State<WasherDashboardPage> {
       _devicesFuture = _repository.fetchDevices(_deviceCodes);
     });
     _queueController.updateReminderLeadMinutes(config.reminderLeadMinutes);
+  }
+
+  bool _isOwned(String code) => _ownedDevices.containsKey(code);
+
+  Duration? _ownedRemaining(String code) {
+    final record = _ownedDevices[code];
+    if (record == null) {
+      return null;
+    }
+    final remaining = record.finishAt.difference(DateTime.now());
+    if (remaining.isNegative) {
+      return Duration.zero;
+    }
+    return remaining;
+  }
+
+  Future<void> _markOwnedDevice(WasherDevice device) async {
+    if (device.surplusTime <= 0) {
+      return;
+    }
+    final finishAt = DateTime.now().add(Duration(minutes: device.surplusTime));
+    final displayName = device.name.isNotEmpty ? device.name : device.code;
+    final updatedRecord = OwnedDeviceRecord(
+      name: displayName,
+      finishAt: finishAt,
+      deviceId: device.id,
+    );
+    setState(() {
+      _ownedDevices = {
+        ..._ownedDevices,
+        device.code: updatedRecord,
+      };
+    });
+    await _prefsService.saveOwnedDevices(_ownedDevices);
+    await _notificationService.scheduleOwnedDeviceReminders(
+      deviceId: device.id,
+      code: device.code,
+      name: displayName,
+      finishAt: finishAt,
+    );
+    if (!mounted) {
+      return;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('$displayName 已标记为我的设备'),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  Future<void> _clearOwnedDevice(WasherDevice device) async {
+    final record = _ownedDevices[device.code];
+    if (record == null) {
+      return;
+    }
+    setState(() {
+      _ownedDevices = Map<String, OwnedDeviceRecord>.from(_ownedDevices)
+        ..remove(device.code);
+    });
+    await _prefsService.saveOwnedDevices(_ownedDevices);
+    await _notificationService.cancelOwnedDeviceReminders(record.deviceId);
+    if (!mounted) {
+      return;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('${device.name.isNotEmpty ? device.name : device.code} 已取消标记'),
+        duration: const Duration(seconds: 2),
+      ),
+    );
   }
 
   Future<void> _startReminder(List<WasherDevice> devices) async {
@@ -728,6 +979,9 @@ class _WasherDashboardPageState extends State<WasherDashboardPage> {
                           _confirmAndRemoveDevice(device.code);
                         },
                         useCompactLayout: _useCompactCards,
+                        ownedRecord: _ownedDevices[device.code],
+                        onMarkOwned: () => _markOwnedDevice(device),
+                        onClearOwned: () => _clearOwnedDevice(device),
                       );
                     },
                   ),
@@ -857,7 +1111,12 @@ class _WasherDashboardPageState extends State<WasherDashboardPage> {
     setState(() {});
   }
 
-  void _handleNextSchedule(WasherDevice? device, Duration? delay) {
+  void _handleNextSchedule(
+    WasherDevice? device,
+    Duration? delay,
+    int? stageMinutes,
+    bool isFinalStage,
+  ) {
     setState(() {
       _nextDevice = device;
       _nextDelay = delay;
@@ -867,8 +1126,7 @@ class _WasherDashboardPageState extends State<WasherDashboardPage> {
       unawaited(
         _notificationService.showCountdownNotification(
           title: '洗衣机提醒队列',
-          body:
-              '${device.name.isNotEmpty ? device.name : device.code} 预计 ${_formatCountdown(delay)} 后可用',
+          body: _buildCountdownBody(device, stageMinutes, delay, isFinalStage),
         ),
       );
       _countdownSub = Stream<DateTime>.periodic(
@@ -892,8 +1150,7 @@ class _WasherDashboardPageState extends State<WasherDashboardPage> {
           unawaited(
             _notificationService.showCountdownNotification(
               title: '洗衣机提醒队列',
-              body:
-                  '${device.name.isNotEmpty ? device.name : device.code} 预计 ${_formatCountdown(remaining)} 后可用',
+              body: _buildCountdownBody(device, stageMinutes, remaining, isFinalStage),
             ),
           );
         }
@@ -901,20 +1158,34 @@ class _WasherDashboardPageState extends State<WasherDashboardPage> {
     }
   }
 
-  Future<void> _handleDeviceAvailable(
+  String _buildCountdownBody(
     WasherDevice device,
-    int remainingMinutes,
+    int? stageMinutes,
+    Duration remaining,
+    bool isFinalStage,
+  ) {
+    final nameOrCode = device.name.isNotEmpty ? device.name : device.code;
+    if (stageMinutes != null && !isFinalStage) {
+      return '$nameOrCode 预计 ${stageMinutes.toString().padLeft(1, '0')} 分钟后空闲';
+    }
+    return '$nameOrCode 预计 ${_formatCountdown(remaining)} 后可用';
+  }
+
+  Future<void> _handleReminderStage(
+    WasherDevice device,
+    int stageMinutes,
+    bool isFinal,
   ) async {
     await _notificationService.hideCountdownNotification();
     final nameOrCode = device.name.isNotEmpty ? device.name : device.code;
-    if (remainingMinutes > 0) {
+    if (!isFinal) {
       await _notificationService.showLeadTimeReminder(
-        id: device.id,
+        id: device.id + stageMinutes,
         title: '洗衣机即将空闲',
-        body: '$nameOrCode 约 ${remainingMinutes} 分钟后空闲',
+        body: '$nameOrCode 约 $stageMinutes 分钟后空闲',
       );
     } else {
-      await _notification_service.scheduleAvailabilityNotification(
+      await _notificationService.scheduleAvailabilityNotification(
         id: device.id,
         title: '洗衣机可用提醒',
         body: '$nameOrCode 现在可用',
@@ -927,9 +1198,9 @@ class _WasherDashboardPageState extends State<WasherDashboardPage> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
-          remainingMinutes > 0
-              ? '$nameOrCode 约 ${remainingMinutes} 分钟后空闲'
-              : '$nameOrCode 已空闲',
+          isFinal
+              ? '$nameOrCode 已空闲'
+              : '$nameOrCode 约 $stageMinutes 分钟后空闲',
         ),
         duration: const Duration(seconds: 3),
       ),
@@ -1274,6 +1545,9 @@ class _DeviceCard extends StatelessWidget {
     required this.onToggleExclude,
     required this.onDelete,
     required this.useCompactLayout,
+    required this.ownedRecord,
+    required this.onMarkOwned,
+    required this.onClearOwned,
   });
 
   final WasherDevice device;
@@ -1281,6 +1555,9 @@ class _DeviceCard extends StatelessWidget {
   final Future<void> Function(String code) onToggleExclude;
   final VoidCallback onDelete;
   final bool useCompactLayout;
+  final OwnedDeviceRecord? ownedRecord;
+  final VoidCallback onMarkOwned;
+  final VoidCallback onClearOwned;
 
   @override
   Widget build(BuildContext context) {
@@ -1291,6 +1568,13 @@ class _DeviceCard extends StatelessWidget {
       color: statusColor,
       fontWeight: FontWeight.w600,
     );
+    final bool isOwned = ownedRecord != null;
+    final Duration? ownedRemaining = ownedRecord == null
+        ? null
+        : ownedRecord!.finishAt.difference(DateTime.now());
+    final Duration? safeOwnedRemaining = ownedRemaining == null
+        ? null
+        : (ownedRemaining.isNegative ? Duration.zero : ownedRemaining);
 
     if (useCompactLayout) {
       return _CompactDeviceTile(
@@ -1298,6 +1582,9 @@ class _DeviceCard extends StatelessWidget {
         isExcluded: isExcluded,
         onToggleExclude: onToggleExclude,
         onDelete: onDelete,
+        ownedRecord: ownedRecord,
+        onMarkOwned: onMarkOwned,
+        onClearOwned: onClearOwned,
       );
     }
 
@@ -1339,6 +1626,12 @@ class _DeviceCard extends StatelessWidget {
                           fontWeight: FontWeight.w600,
                         ),
                       ),
+                      if (isOwned) ...[
+                        const SizedBox(height: 8),
+                        _OwnedStatusBadge(
+                          remaining: safeOwnedRemaining,
+                        ),
+                      ],
                       const SizedBox(height: 6),
                       Text(
                         device.location.isNotEmpty
@@ -1393,6 +1686,15 @@ class _DeviceCard extends StatelessWidget {
                     onToggleExclude(device.code);
                   },
                 ),
+                if (!device.isAvailable && !device.isInMaintenance)
+                  ActionChip(
+                    avatar: Icon(
+                      isOwned ? Icons.check_circle : Icons.flag_outlined,
+                      size: 18,
+                    ),
+                    label: Text(isOwned ? '取消标记' : '标记为我的'),
+                    onPressed: isOwned ? onClearOwned : onMarkOwned,
+                  ),
               ],
             ),
             const SizedBox(height: 18),
@@ -1442,6 +1744,14 @@ class _DeviceCard extends StatelessWidget {
               Text(
                 _formatLastDeal(device.lastDeal!),
                 style: theme.textTheme.bodyMedium,
+              ),
+            ],
+            if (isOwned && safeOwnedRemaining != null) ...[
+              const SizedBox(height: 18),
+              _OwnedCountdownCard(
+                name: device.name.isNotEmpty ? device.name : device.code,
+                remaining: safeOwnedRemaining,
+                onClearOwned: onClearOwned,
               ),
             ],
           ],
