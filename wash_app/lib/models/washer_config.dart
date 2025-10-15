@@ -18,15 +18,9 @@ class WasherConfig {
         'Authorization':
             'Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzM4NCJ9.eyJleHAiOjE3NjU2MTI5NTIsInVzZXJJZCI6IjEzMjExMTYiLCJpYXQiOjE3NTAwNjA5NTIsInBsYXRmb3JtIjoiYXBwIn0.DQWa0ZA_pGRLx35uVC2ki0HRe-W-PU4AEc0GMBujgebSa7oK2ahbfkdGarXH1nuY',
         'Tokenplatform': 'yx',
-        'Accept-Encoding': 'gzip, deflate, br',
         'Accept-Language': 'zh-Hans-CN;q=1, en-CN;q=0.9',
         'Content-Type': 'application/json',
-        'User-Agent':
-            'WasherV4-AppStore/8.3.2 (iPhone; iOS 16.3.1; Scale/3.00)',
-        'Connection': 'keep-alive',
         'sourceType': 'ios',
-        'Cookie':
-            'SERVERCORSID=2208ec3041576885a9430be6fc702875|1760459467|1760457965; SERVERID=2208ec3041576885a9430be6fc702875|1760459467|1760457965',
       },
       reminderLeadMinutes: 0,
     );
@@ -52,7 +46,7 @@ class WasherConfig {
           ?? WasherConfig.defaultConfig().qrTemplate,
       headers: headers.isEmpty
           ? WasherConfig.defaultConfig().headers
-          : headers,
+          : _sanitizeHeaders(headers),
       reminderLeadMinutes:
           (json['reminderLeadMinutes'] as num?)?.toInt() ?? WasherConfig.defaultConfig().reminderLeadMinutes,
     );
@@ -71,11 +65,14 @@ class WasherConfig {
     Map<String, String>? headers,
     int? reminderLeadMinutes,
   }) {
+    final sanitizedHeaders = headers == null
+        ? Map<String, String>.from(this.headers)
+        : _sanitizeHeaders(headers);
     return WasherConfig(
       baseUrl: baseUrl ?? this.baseUrl,
       endpoint: endpoint ?? this.endpoint,
       qrTemplate: qrTemplate ?? this.qrTemplate,
-      headers: headers ?? Map<String, String>.from(this.headers),
+      headers: sanitizedHeaders,
       reminderLeadMinutes: reminderLeadMinutes ?? this.reminderLeadMinutes,
     );
   }
@@ -95,5 +92,23 @@ class WasherConfig {
       return qrTemplate.replaceAll('{code}', code);
     }
     return '$qrTemplate$code';
+  }
+
+  static Map<String, String> _sanitizeHeaders(Map<String, String> headers) {
+    final cleaned = <String, String>{};
+    headers.forEach((key, value) {
+      final lowerKey = key.toLowerCase();
+      const forbiddenHeaders = {
+        'accept-encoding',
+        'user-agent',
+        'connection',
+        'cookie',
+      };
+      if (forbiddenHeaders.contains(lowerKey)) {
+        return;
+      }
+      cleaned[key] = value;
+    });
+    return cleaned;
   }
 }

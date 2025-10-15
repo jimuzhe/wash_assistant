@@ -45,7 +45,7 @@ class WasherApi {
       );
     }
 
-    final rawBody = response.data;
+    final rawBody = response.data?.trim();
     if (rawBody == null || rawBody.isEmpty) {
       throw WasherApiException('设备 $deviceCode 接口返回为空');
     }

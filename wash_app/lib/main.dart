@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
+import 'utils/camera_permission_stub.dart' if (dart.library.html) 'utils/camera_permission_web.dart';
 
 import 'models/washer_config.dart';
 import 'models/washer_device.dart';
@@ -64,6 +65,38 @@ class _OwnedStatusBadge extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _CameraPermissionNotice extends StatelessWidget {
+  const _CameraPermissionNotice();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.2),
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: const [
+              Icon(Icons.camera_alt_outlined, size: 40),
+              SizedBox(height: 16),
+              Text(
+                '无法访问摄像头',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+              ),
+              SizedBox(height: 8),
+              Text(
+                '请在浏览器设置中允许摄像头权限，或选择手动输入设备编号。',
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -1329,6 +1362,10 @@ class _WasherDashboardPageState extends State<WasherDashboardPage> {
     final controller = MobileScannerController(returnImage: false);
     String? result;
     bool handled = false;
+    bool scannerAvailable = true;
+    if (!await requestCameraPermission()) {
+      scannerAvailable = false;
+    }
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -1361,24 +1398,26 @@ class _WasherDashboardPageState extends State<WasherDashboardPage> {
                 Expanded(
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(16),
-                    child: MobileScanner(
-                      controller: controller,
-                      onDetect: (capture) {
-                        if (handled) {
-                          return;
-                        }
-                        for (final barcode in capture.barcodes) {
-                          final rawValue = barcode.rawValue;
-                          if (rawValue != null && rawValue.isNotEmpty) {
-                            handled = true;
-                            result = rawValue;
-                            controller.stop();
-                            Navigator.of(sheetContext).pop();
-                            break;
-                          }
-                        }
-                      },
-                    ),
+                    child: scannerAvailable
+                        ? MobileScanner(
+                            controller: controller,
+                            onDetect: (capture) {
+                              if (handled) {
+                                return;
+                              }
+                              for (final barcode in capture.barcodes) {
+                                final rawValue = barcode.rawValue;
+                                if (rawValue != null && rawValue.isNotEmpty) {
+                                  handled = true;
+                                  result = rawValue;
+                                  controller.stop();
+                                  Navigator.of(sheetContext).pop();
+                                  break;
+                                }
+                              }
+                            },
+                          )
+                        : const _CameraPermissionNotice(),
                   ),
                 ),
                 Padding(
