@@ -23,15 +23,42 @@ class WasherApi {
       'code': _config.buildQrCode(deviceCode),
     });
 
-    final response = await _dio.post<Map<String, dynamic>>(
-      _config.endpoint,
-      data: payload,
-      options: Options(headers: _config.headers, contentType: 'application/json'),
-    );
+    Response<String> response;
+    try {
+      response = await _dio.post<String>(
+        _config.endpoint,
+        data: payload,
+        options: Options(
+          headers: _config.headers,
+          contentType: 'application/json',
+          responseType: ResponseType.plain,
+        ),
+      );
+    } on DioException catch (error) {
+      final statusCode = error.response?.statusCode;
+      final body = error.response?.data;
+      final detail = body is String && body.isNotEmpty
+          ? body
+          : error.message ?? '网络请求失败';
+      throw WasherApiException(
+        '设备 $deviceCode 请求失败${statusCode != null ? ' (HTTP $statusCode)' : ''}: $detail',
+      );
+    }
 
-    final body = response.data;
-    if (body == null) {
-      throw const WasherApiException('接口返回为空');
+    final rawBody = response.data;
+    if (rawBody == null || rawBody.isEmpty) {
+      throw WasherApiException('设备 $deviceCode 接口返回为空');
+    }
+
+    Map<String, dynamic> body;
+    try {
+      final decoded = jsonDecode(rawBody);
+      if (decoded is! Map<String, dynamic>) {
+        throw const FormatException('响应不是 JSON 对象');
+      }
+      body = decoded;
+    } on FormatException catch (error) {
+      throw WasherApiException('设备 $deviceCode 返回格式错误: ${error.message}');
     }
 
     final success = (body['success'] as bool?) ?? false;

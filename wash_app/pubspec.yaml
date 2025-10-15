@@ -56,8 +56,10 @@ flutter_launcher_icons:
   image_path: assets/icons/app_icon.png
   android: true
   ios: true
-  macos: true
-  windows: true
+  macos:
+    generate: true
+  windows:
+    generate: true
   web:
     generate: true
     image_path: assets/icons/app_icon.png
