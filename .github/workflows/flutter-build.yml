@@ -64,23 +64,37 @@ jobs:
         working-directory: wash_app
         run: flutter pub get
 
-      - name: Build IPA
+      - name: Build iOS app and package IPA (unsigned)
         working-directory: wash_app
         env:
           BUILD_FLAVORS: ${{ github.event.inputs['build-flavors'] || 'release' }}
         run: |
+          set -eo pipefail
           IFS=',' read -ra FLAVORS <<< "$BUILD_FLAVORS"
           for flavor in "${FLAVORS[@]}"; do
             flavor=$(echo "$flavor" | xargs)
-            if [ -n "$flavor" ]; then
-              flutter build ipa --${flavor} --no-codesign
+            build_mode=${flavor:-release}
+
+            if [ "$build_mode" = "release" ]; then
+              flutter build ios --release --no-codesign
             else
-              flutter build ipa --release --no-codesign
+              flutter build ios --${build_mode} --no-codesign
             fi
+
+            APP_DIR="build/ios/iphoneos"
+            OUTPUT_DIR="build/ios/ipa/${build_mode}"
+            IPA_NAME="Runner-${build_mode}-unsigned.ipa"
+
+            rm -rf Payload
+            mkdir -p Payload "$OUTPUT_DIR"
+            cp -R "$APP_DIR/Runner.app" Payload/
+            (cd Payload && zip -qry "../$IPA_NAME" "Runner.app")
+            mv "$IPA_NAME" "$OUTPUT_DIR/"
+            rm -rf Payload
           done
 
       - name: Upload IPA artifacts
         uses: actions/upload-artifact@v4
         with:
           name: ios-ipa
-          path: wash_app/build/ios/ipa/*.ipa
+          path: wash_app/build/ios/ipa/**/*.ipa
